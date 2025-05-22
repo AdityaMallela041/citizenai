@@ -898,13 +898,13 @@ def render_about():
     team_cols = st.columns(4)
     
     with team_cols[0]:
-        st.markdown("**Jane Smith**<br>AI Engineer", unsafe_allow_html=True)
+        st.markdown("**Aditya Mallela**<br>AI Engineer", unsafe_allow_html=True)
     with team_cols[1]:
-        st.markdown("**Alex Johnson**<br>Full-stack Developer", unsafe_allow_html=True)
+        st.markdown("**Aditya Mallela**<br>Full-stack Developer", unsafe_allow_html=True)
     with team_cols[2]:
-        st.markdown("**Sarah Chen**<br>UX/UI Designer", unsafe_allow_html=True)
+        st.markdown("**Akshith Jalagari**<br>UX/UI Designer", unsafe_allow_html=True)
     with team_cols[3]:
-        st.markdown("**Michael Brown**<br>Data Scientist", unsafe_allow_html=True)
+        st.markdown("**Pavan Kumar Mudumba**<br>Data Scientist", unsafe_allow_html=True)
 
 # Run the application
 if __name__ == "__main__":
