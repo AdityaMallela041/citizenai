@@ -1,0 +1,64 @@
+{
+    "sample_queries": [
+        {
+            "query": "How do I get a birth certificate?",
+            "category": "public_services",
+            "priority": "low",
+            "department": "Vital Records"
+        },
+        {
+            "query": "There's a dangerous pothole on Main Street that needs immediate repair",
+            "category": "infrastructure",
+            "priority": "high",
+            "department": "Public Works Department"
+        },
+        {
+            "query": "When is the next city council meeting?",
+            "category": "governance",
+            "priority": "low",
+            "department": "City Manager's Office"
+        },
+        {
+            "query": "I need a business permit for my new restaurant",
+            "category": "permits",
+            "priority": "medium",
+            "department": "Permits and Licensing Department"
+        },
+        {
+            "query": "The streetlight on Oak Avenue is not working",
+            "category": "infrastructure",
+            "priority": "medium",
+            "department": "Public Works Department"
+        },
+        {
+            "query": "How do I pay my water bill online?",
+            "category": "public_services",
+            "priority": "low",
+            "department": "Utilities Department"
+        },
+        {
+            "query": "When will the park renovation be completed?",
+            "category": "recreation",
+            "priority": "low",
+            "department": "Parks and Recreation"
+        },
+        {
+            "query": "There's flooding on my street after the storm",
+            "category": "emergency",
+            "priority": "high",
+            "department": "Emergency Services"
+        },
+        {
+            "query": "How do I apply for a building permit?",
+            "category": "permits",
+            "priority": "medium",
+            "department": "Permits and Licensing Department"
+        },
+        {
+            "query": "What are the library hours?",
+            "category": "education",
+            "priority": "low",
+            "department": "Education Department"
+        }
+    ]
+}

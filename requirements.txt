@@ -1,0 +1,27 @@
+# requirements.txt
+
+# Core dependencies
+streamlit>=1.32.0
+transformers>=4.37.0
+torch>=2.1.0
+
+# LangChain for conversation management
+langchain>=0.1.0
+
+# Data processing
+pandas>=2.1.0
+numpy>=1.26.0
+
+# Sentiment analysis
+nltk>=3.8.1
+textblob>=0.17.1
+
+# Visualization
+plotly>=5.18.0
+matplotlib>=3.8.0
+
+# Authentication
+sqlalchemy>=2.0.0
+passlib>=1.7.4
+bcrypt>=4.0.1
+extra-streamlit-components>=0.1.6
