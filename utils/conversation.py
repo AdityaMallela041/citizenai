@@ -1,65 +1,52 @@
-import os
 from langchain.memory import ConversationBufferMemory
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
+from langchain_community.llms import HuggingFacePipeline
+import transformers
+import torch
+from langchain.prompts.base import StringPromptTemplate
+from typing import List
+
 
 class ConversationManager:
-    """
-    Manages conversation history and context for the chatbot.
-    Provides session management and context retrieval for multi-turn dialogues.
-    """
-    
-    def __init__(self):
-        self.memory = ConversationBufferMemory(return_messages=True)
-    
-    def get_context(self, conversation_history):
-        """
-        Extract relevant context from conversation history
-        to provide to the IBM Granite model
-        
-        Args:
-            conversation_history: List of conversation messages
-            
-        Returns:
-            String containing relevant context
-        """
-        # For simplicity, we'll include the last 3 exchanges
-        relevant_history = conversation_history[-6:] if len(conversation_history) > 6 else conversation_history
-        
-        # Format context for the model
-        context_text = ""
-        for message in relevant_history:
-            role = "Human" if message["role"] == "user" else "Assistant"
-            context_text += f"{role}: {message['content']}\n"
-            
-        return context_text.strip()
-    
-    def update_context(self, conversation_history):
-        """
-        Update the conversation memory with the latest exchanges
-        
-        Args:
-            conversation_history: List of conversation messages
-        """
-        # Extract the latest exchange if available
-        if len(conversation_history) >= 2:
-            latest_user = conversation_history[-2]["content"]
-            latest_assistant = conversation_history[-1]["content"]
-            
-            # Update memory
-            self.memory.save_context({"input": latest_user}, {"output": latest_assistant})
-    
-    def get_summary(self):
-        """
-        Get a summary of the conversation for routing or classification
-        
-        Returns:
-            String summary of key conversation points
-        """
-        # In a real implementation, you might use the IBM Granite model to generate
-        # a summary of the conversation here
-        return self.memory.load_memory_variables({}).get("history", "")
-        
+    def __init__(self, model, tokenizer):
+        self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+                
+        pipe = transformers.pipeline(
+            "text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            device=0 if torch.cuda.is_available() else -1,
+            max_new_tokens=1024,
+            temperature=0.7,
+            top_k=50,
+            top_p=0.95,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+
+        llm = HuggingFacePipeline(pipeline=pipe)
+
+        class SimpleChatFormatter(StringPromptTemplate):
+            def format(self, **kwargs) -> str:
+                chat_history: List = kwargs["chat_history"]
+                input_text: str = kwargs["input"]
+
+                formatted_history = ""
+                for msg in chat_history:
+                    role = "User" if msg.type == "human" else "Assistant"
+                    formatted_history += f"{role}: {msg.content}\n"
+
+                return f"{formatted_history}User: {input_text}\nAssistant:"
+
+        prompt = SimpleChatFormatter(input_variables=["chat_history", "input"])
+
+
+
+        self.chain = LLMChain(llm=llm, prompt=prompt, memory=self.memory)
+
+    def get_response(self, user_input):
+        return self.chain.predict(input=user_input)
+
     def clear(self):
-        """
-        Clear the conversation memory
-        """
         self.memory.clear()

@@ -7,6 +7,11 @@ import os
 import warnings
 from dotenv import load_dotenv
 from utils.conversation import ConversationManager
+from langchain.memory import ConversationBufferMemory
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
+from langchain_community.llms import HuggingFacePipeline
+import transformers
 from utils.sentiment import SentimentAnalyzer
 from utils.automation import QueryClassifier
 from utils.visualization import create_sentiment_chart, create_issue_distribution_chart
@@ -14,6 +19,14 @@ import hashlib
 import sqlite3
 import uuid
 import datetime
+import transformers
+import base64
+from utils.complaint import ComplaintManager
+from utils.complaint import (
+    render_complaint_submission_form,
+    render_citizen_complaints_view,
+    render_government_complaints_view,
+)
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
@@ -36,6 +49,25 @@ if "torch.classes" in sys.modules:
 
 # Page layout
 st.set_page_config(page_title="CitizenAI", page_icon=None, layout="wide")
+
+def set_background(image_file):
+    with open(image_file, "rb") as f:
+        data = f.read()
+    encoded = f"data:image/jpg;base64,{base64.b64encode(data).decode()}"
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-image: url("{encoded}");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+set_background("assets/background.jpg") 
 
 # Load environment variables
 load_dotenv()
@@ -265,6 +297,9 @@ def logout():
 def init_session_state():
     if "db_connection" not in st.session_state:
         st.session_state.db_connection = init_db()
+
+    if "complaint_manager" not in st.session_state:
+        st.session_state.complaint_manager = ComplaintManager(st.session_state.db_connection)
     
     if "conversation_history" not in st.session_state:
         st.session_state.conversation_history = []
@@ -298,11 +333,14 @@ def init_session_state():
 # Initialize managers/utilities
 @st.cache_resource
 def init_utilities():
-    conversation_manager = ConversationManager()
+    tokenizer, model, device = st.session_state.tokenizer, st.session_state.model, st.session_state.device
+    conversation_manager = ConversationManager(model, tokenizer)
     sentiment_analyzer = SentimentAnalyzer()
     query_classifier = QueryClassifier()
-    return conversation_manager, sentiment_analyzer, query_classifier
+    from utils.complaint import ComplaintManager
+    complaint_manager = ComplaintManager(st.session_state.db_connection)
 
+    return conversation_manager, sentiment_analyzer, query_classifier, complaint_manager
 # Main application
 def main():
     # Initialize session state first
@@ -327,7 +365,7 @@ def main():
         model = st.session_state.model
         device = st.session_state.device
     
-    conversation_manager, sentiment_analyzer, query_classifier = init_utilities()
+    conversation_manager, sentiment_analyzer, query_classifier, complaint_manager = init_utilities()
     
     # Check if user is logged in
     is_logged_in, user_type = check_session()
@@ -335,40 +373,223 @@ def main():
     # Handle navigation and authentication
     if not is_logged_in and st.session_state.current_page not in ["login", "register", "gov_register"]:
         st.session_state.current_page = "login"
+
     
+    st.session_state.complaint_manager = complaint_manager
+    st.session_state.user_type = user_type
+
+
     # Common header and navigation for authenticated users
     if is_logged_in:
         with st.sidebar:
-            st.title("CitizenAI")
-            st.subheader("Intelligent Citizen Engagement")
+            # Professional CSS styling matching the dark tech background
+            st.markdown("""
+            <style>
+            .sidebar-header {
+                background: linear-gradient(135deg, #0a4d68 0%, #1a365d 50%, #2c5530 100%);
+                padding: 2rem 1.5rem;
+                border-radius: 8px;
+                margin-bottom: 1.5rem;
+                text-align: center;
+                box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+                border: 1px solid rgba(0, 255, 255, 0.1);
+            }
+            .sidebar-title {
+                color: #00ffff;
+                font-size: 1.8rem;
+                font-weight: 600;
+                margin: 0;
+                letter-spacing: 1px;
+                text-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+            }
+            .sidebar-subtitle {
+                color: rgba(0, 255, 255, 0.7);
+                font-size: 0.85rem;
+                margin: 0.8rem 0 0 0;
+                font-weight: 300;
+                letter-spacing: 0.5px;
+            }
+            .nav-section {
+                background: rgba(0, 20, 40, 0.4);
+                padding: 1.5rem;
+                border-radius: 8px;
+                margin: 1.5rem 0;
+                border-left: 3px solid #00ffff;
+                backdrop-filter: blur(10px);
+            }
+            .nav-title {
+                color: #00ffff;
+                font-size: 1.1rem;
+                font-weight: 500;
+                margin-bottom: 1rem;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }
+            .user-info {
+                background: linear-gradient(135deg, #1a365d 0%, #2d3748 100%);
+                padding: 1.5rem;
+                border-radius: 8px;
+                margin: 1.5rem 0;
+                text-align: center;
+                color: #e2e8f0;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+                border: 1px solid rgba(0, 255, 255, 0.1);
+            }
+            .user-badge {
+                background: linear-gradient(135deg, #0a4d68, #2c5530);
+                color: #00ffff;
+                padding: 0.4rem 1rem;
+                border-radius: 20px;
+                font-size: 0.75rem;
+                margin-top: 0.8rem;
+                display: inline-block;
+                font-weight: 500;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                border: 1px solid rgba(0, 255, 255, 0.2);
+            }
+            .footer-info {
+                background: linear-gradient(135deg, #2c5530 0%, #1a365d 100%);
+                padding: 1.5rem;
+                border-radius: 8px;
+                text-align: center;
+                color: #e2e8f0;
+                font-weight: 500;
+                margin-top: 2rem;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+                border: 1px solid rgba(0, 255, 255, 0.1);
+            }
+            .event-title {
+                color: #00ffff;
+                font-size: 1rem;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }
+            .stButton > button {
+                width: 100%;
+                background: linear-gradient(135deg, #2d3748 0%, #1a365d 100%);
+                color: #e2e8f0;
+                border: 1px solid rgba(0, 255, 255, 0.2);
+                padding: 0.75rem 1rem;
+                border-radius: 6px;
+                font-weight: 500;
+                margin: 0.3rem 0;
+                transition: all 0.3s ease;
+                font-size: 0.9rem;
+                text-transform: none;
+            }
+            .stButton > button:hover {
+                background: linear-gradient(135deg, #0a4d68 0%, #2c5530 100%);
+                border-color: #00ffff;
+                color: #00ffff;
+                transform: translateY(-1px);
+                box-shadow: 0 4px 12px rgba(0, 255, 255, 0.2);
+            }
+            .logout-btn {
+                background: linear-gradient(135deg, #744210 0%, #c53030 100%) !important;
+                border-color: rgba(255, 0, 0, 0.3) !important;
+            }
+            .logout-btn:hover {
+                background: linear-gradient(135deg, #c53030 0%, #744210 100%) !important;
+                border-color: #ff6b6b !important;
+                color: #fff !important;
+            }
+            .stats-container {
+                background: rgba(0, 20, 40, 0.3);
+                padding: 1rem;
+                border-radius: 6px;
+                margin: 1rem 0;
+                border: 1px solid rgba(0, 255, 255, 0.1);
+            }
+            .metric-label {
+                color: #a0aec0;
+                font-size: 0.75rem;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            .metric-value {
+                color: #00ffff;
+                font-weight: 600;
+                font-size: 0.9rem;
+            }
+            </style>
+            """, unsafe_allow_html=True)
             
-            user_options = ["Citizen Assistant", "Analytics Dashboard", "About System"]
+            # Professional header
+            st.markdown("""
+            <div class="sidebar-header">
+                <h1 class="sidebar-title">CITIZENAI</h1>
+                <p class="sidebar-subtitle">Government Intelligence Platform</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Navigation section
+            st.markdown('<div class="nav-section">', unsafe_allow_html=True)
+            st.markdown('<div class="nav-title">Navigation</div>', unsafe_allow_html=True)
+            
+            user_options = [
+                ("AI Assistant", "chat"),
+                ("Analytics Dashboard", "dashboard"), 
+                ("System Information", "about")
+            ]
+            # ✅ Insert complaint pages conditionally
+            if user_type == "citizen":
+                user_options.insert(1, ("Submit Complaint", "submit_complaint"))
+                user_options.insert(2, ("My Complaints", "my_complaints"))
+            elif user_type in ["government", "admin"]:
+                user_options.insert(1, ("Manage Complaints", "manage_complaints"))
+
             
             # Add admin options for government officials and admins
             if user_type in ["government", "admin"]:
-                user_options.append("Admin Panel")
+                user_options.append(("Administration", "admin"))
             
-            selected_page = st.radio("Navigation", user_options)
+            # Create navigation buttons
+            for option_text, page_key in user_options:
+                if st.button(option_text, key=f"nav_{page_key}"):
+                    st.session_state.current_page = page_key
+                    st.rerun()
             
-            if selected_page == "Citizen Assistant":
-                st.session_state.current_page = "chat"
-            elif selected_page == "Analytics Dashboard":
-                st.session_state.current_page = "dashboard"
-            elif selected_page == "Admin Panel":
-                st.session_state.current_page = "admin"
-            elif selected_page == "About System":
-                st.session_state.current_page = "about"
+            st.markdown('</div>', unsafe_allow_html=True)
             
-            st.divider()
-            if st.button("Logout"):
+            # User information section
+            if "username" in st.session_state:
+                user_type_display = user_type.upper() if user_type else "USER"
+                
+                st.markdown(f"""
+                <div class="user-info">
+                    <div style="font-size: 1.1rem; margin-bottom: 0.5rem; font-weight: 500;">{st.session_state.username}</div>
+                    <div class="user-badge">{user_type_display}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Logout button
+            st.markdown("---")
+            if st.button("LOGOUT", key="logout_btn"):
                 logout()
                 st.rerun()
             
-            # Check if username exists in session state before displaying it
-            if "username" in st.session_state:
-                st.markdown(f"**Logged in as: {st.session_state.username}**")
-            st.markdown("**IBM Hackathon 2025**")
-    
+            # System stats
+            st.markdown('<div class="stats-container">', unsafe_allow_html=True)
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown('<div class="metric-label">Status</div><div class="metric-value">ONLINE</div>', unsafe_allow_html=True)
+            with col2:
+                st.markdown('<div class="metric-label">Version</div><div class="metric-value">2.0.1</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Footer with event information
+            st.markdown("""
+            <div class="footer-info">
+                <div style="font-size: 0.8rem; margin-bottom: 0.3rem; color: #a0aec0;">POWERED BY</div>
+                <div class="event-title">IBM GRANITE</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    user_type = st.session_state.user_type
+    complaint_manager = st.session_state.complaint_manager
+
     # Display selected page
     if st.session_state.current_page == "login":
         render_login_page()
@@ -382,8 +603,97 @@ def main():
         render_dashboard()
     elif st.session_state.current_page == "admin":
         render_admin_panel()
+     # ✅ Complaint system pages
+    elif st.session_state.current_page == "submit_complaint":
+        render_complaint_submission_form(complaint_manager, st.session_state.user_id)
+
+    elif st.session_state.current_page == "my_complaints":
+        render_citizen_complaints_view(complaint_manager, st.session_state.user_id)
+
+    elif st.session_state.current_page == "manage_complaints":
+        render_government_complaints_view(
+            st.session_state.complaint_manager,
+            st.session_state.user_id,
+            st.session_state.user_type
+        )
+
     else:
         render_about()
+
+# ✅ Handle complaint detail view only for admin/government users
+if "selected_complaint" in st.session_state and st.session_state.user_type in ["admin", "government"]:
+    user_type = st.session_state.user_type
+    complaint_manager = st.session_state.complaint_manager
+    complaint_id = st.session_state.selected_complaint
+
+    with st.container():
+        st.subheader("Complaint Details")
+
+        # Get complaint details
+        complaints = complaint_manager.get_all_complaints()
+        complaint = next((c for c in complaints if c["id"] == complaint_id), None)
+
+        if complaint:
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.write(f"**ID:** {complaint['id']}")
+                st.write(f"**Title:** {complaint['title']}")
+                st.write(f"**Citizen:** {complaint['citizen_name']}")
+                st.write(f"**Category:** {complaint['category_name']}")
+                st.write(f"**Priority:** {complaint['priority']}")
+
+            with col2:
+                st.write(f"**Status:** {complaint['status']}")
+                st.write(f"**Location:** {complaint['location'] or 'Not specified'}")
+                st.write(f"**Submitted:** {complaint['created_at']}")
+                st.write(f"**Assigned to:** {complaint['assigned_to_name'] or 'Unassigned'}")
+
+            st.write(f"**Description:** {complaint['description']}")
+
+            # Assignment section
+            st.subheader("Assignment")
+            c = st.session_state.db_connection.cursor()
+            c.execute('''
+                SELECT u.id, u.username, g.department, g.position
+                FROM users u 
+                JOIN government_officials g ON u.id = g.user_id 
+                WHERE g.approved = 1
+            ''')
+            officials = c.fetchall()
+
+            if officials:
+                official_options = {
+                    f"{username} ({department} - {position})": uid
+                    for uid, username, department, position in officials
+                }
+
+                selected_official = st.selectbox("Assign to:", list(official_options.keys()))
+
+                if st.button("Assign Complaint"):
+                    official_id = official_options[selected_official]
+                    if complaint_manager.assign_complaint(complaint_id, official_id, st.session_state.user_id):
+                        st.success("Complaint assigned successfully!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to assign complaint")
+
+            # Updates section
+            st.subheader("Updates & Comments")
+            updates = complaint_manager.get_complaint_updates(complaint_id)
+
+            for update in updates:
+                icon = "👤" if update["user_type"] == "citizen" else "🏛️"
+                with st.container():
+                    st.write(f"{icon} **{update['username']}** - {update['created_at']}")
+                    st.write(f"📝 {update['update_text']}")
+                    st.divider()
+
+        if st.button("Back to Complaints"):
+            del st.session_state.selected_complaint
+            st.session_state.current_page = "manage_complaints"
+            st.rerun()
+
 
 # Login page
 def render_login_page():
@@ -650,67 +960,238 @@ def render_admin_panel():
 
 # Citizen Assistant page with tabs
 def render_citizen_assistant(tokenizer, model, device, conversation_manager):
-    st.title("Citizen Assistant")
+    st.title("🤖 Citizen Assistant")
     
     # Tab selection
-    query_tab, announcements_tab = st.tabs(["User Query", "Announcements"])
+    query_tab, announcements_tab = st.tabs(["💬 User Query", "📢 Announcements"])
     
     with query_tab:
-        # Display conversation history
-        for message in st.session_state.conversation_history:
-            role = message["role"]
-            content = message["content"]
-            
-            with st.chat_message(role):
-                st.write(content)
+        # Display enhanced conversation history
+        render_chat_history()
         
         # User input
         user_input = st.chat_input("Ask a question about city services...")
         
         if user_input:
-            # Add user message to chat
-            st.session_state.conversation_history.append({"role": "user", "content": user_input})
-            with st.chat_message("user"):
-                st.write(user_input)
-            
-            # Get priority and category (would normally come from QueryClassifier)
-            query_category = "Public Services"  # Example category
-            priority = "Medium"  # Example priority
-            
-            # Process with IBM Granite model
-            with st.spinner("Processing your request..."):
-                # Get the conversation context
-                context = conversation_manager.get_context(st.session_state.conversation_history)
+            process_user_input(user_input, conversation_manager)
+            st.rerun()
+    
+    with announcements_tab:
+        st.header("📢 Public Announcements")
+        
+        conn = st.session_state.db_connection
+        c = conn.cursor()
+        
+        c.execute("""
+            SELECT a.id, a.title, a.content, a.created_at, a.importance, u.username, u.user_type
+            FROM announcements a
+            JOIN users u ON a.author_id = u.id
+            ORDER BY 
+                CASE 
+                    WHEN a.importance = 'High' THEN 1 
+                    WHEN a.importance = 'Medium' THEN 2 
+                    ELSE 3 
+                END,
+                a.created_at DESC
+        """)
+        
+        announcements = c.fetchall()
+        
+        if announcements:
+            for announcement in announcements:
+                # Enhanced announcement styling
+                importance_color = {
+                    'High': '#ff4444',
+                    'Medium': '#ff8800', 
+                    'Low': '#44ff44'
+                }
                 
-                # Prepare prompt with context
-                prompt = f"<|user|>\nContext: {context}\nCurrent query: {user_input}\n<|assistant|>\n"
+                importance_icon = {
+                    'High': '🔴',
+                    'Medium': '🟠',
+                    'Low': '🟢'
+                }
                 
-                # Generate response using your existing model
-                inputs = tokenizer(prompt, return_tensors="pt").to(device)
-                outputs = model.generate(
-                    **inputs,
-                    max_new_tokens=2000,
-                    do_sample=True,
-                    temperature=0.7,
-                    top_k=50,
-                    top_p=0.95,
-                    pad_token_id=tokenizer.eos_token_id,
-                )
+                color = importance_color.get(announcement[4], '#cccccc')
+                icon = importance_icon.get(announcement[4], '⚪')
                 
-                response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-                # Extract the assistant's reply
-                assistant_reply = response.split("<|assistant|>")[-1].strip()
+                st.markdown(f"""
+                <div style="
+                    background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(240,240,240,0.9) 100%);
+                    border-left: 5px solid {color};
+                    padding: 20px;
+                    border-radius: 10px;
+                    margin: 15px 0;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                ">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h3 style="margin: 0; color: #333;">{icon} {announcement[1]}</h3>
+                        <span style="font-size: 12px; color: #666; background: rgba(0,0,0,0.1); padding: 5px 10px; border-radius: 15px;">
+                            {announcement[3]}
+                        </span>
+                    </div>
+                    <p style="margin: 10px 0; color: #555; line-height: 1.6;">{announcement[2]}</p>
+                """, unsafe_allow_html=True)
                 
-                # Add system message about query processing (for demonstration)
-                with st.chat_message("assistant"):
-                    st.write(f"*Query categorized as: {query_category} (Priority: {priority})*")
-                    st.write(assistant_reply)
+                # Author info
+                department = ""
+                if announcement[6] in ["government", "admin"]:
+                    c.execute("""
+                        SELECT department, position
+                        FROM government_officials
+                        WHERE user_id = (SELECT id FROM users WHERE username = ?)
+                    """, (announcement[5],))
+                    
+                    official_info = c.fetchone()
+                    if official_info:
+                        department = f" ({official_info[0]} Department, {official_info[1]})"
                 
-                # Add to conversation history
-                st.session_state.conversation_history.append({"role": "assistant", "content": assistant_reply})
+                st.markdown(f"""
+                    <div style="text-align: right; margin-top: 10px;">
+                        <small style="color: #888;">
+                            Posted by: <strong>{announcement[5]}</strong>{department}
+                        </small>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div style="
+                text-align: center;
+                padding: 40px;
+                background: linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%);
+                border-radius: 15px;
+                margin: 20px 0;
+            ">
+                <h3 style="margin: 0; color: #666;">📭 No Announcements</h3>
+                <p style="margin: 10px 0 0 0; color: #888;">No announcements are currently available.</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+# Enhanced chat history display function
+def render_chat_history():
+    """Render enhanced chat history with better styling"""
+    if st.session_state.conversation_history:
+        st.markdown("### 💬 Conversation History")
+        
+        # Add a container for better scrolling
+        chat_container = st.container()
+        
+        with chat_container:
+            for i, message in enumerate(st.session_state.conversation_history):
+                role = message["role"]
+                content = message["content"]
+                timestamp = message.get("timestamp", "")
                 
-                # Update conversation context in the manager
-                conversation_manager.update_context(st.session_state.conversation_history)
+                if role == "user":
+                    # User message styling
+                    st.markdown(f"""
+                    <div style="
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white;
+                        padding: 15px;
+                        border-radius: 15px 15px 5px 15px;
+                        margin: 10px 0px 10px 50px;
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                        position: relative;
+                    ">
+                        <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                            <span style="font-size: 16px; margin-right: 8px;">👤</span>
+                            <strong>You</strong>
+                            <span style="margin-left: auto; font-size: 12px; opacity: 0.8;">{timestamp}</span>
+                        </div>
+                        <div style="font-size: 14px; line-height: 1.5;">{content}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                else:
+                    # Assistant message styling
+                    st.markdown(f"""
+                    <div style="
+                        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+                        color: white;
+                        padding: 15px;
+                        border-radius: 15px 15px 15px 5px;
+                        margin: 10px 50px 10px 0px;
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                        position: relative;
+                    ">
+                        <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                            <span style="font-size: 16px; margin-right: 8px;">🤖</span>
+                            <strong>CitizenAI Assistant</strong>
+                            <span style="margin-left: auto; font-size: 12px; opacity: 0.8;">{timestamp}</span>
+                        </div>
+                        <div style="font-size: 14px; line-height: 1.5;">{content}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        # Add clear chat button
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col2:
+            if st.button("🗑️ Clear Chat History", use_container_width=True):
+                st.session_state.conversation_history = []
+                st.rerun()
+    
+    else:
+        st.markdown("""
+        <div style="
+            text-align: center;
+            padding: 40px;
+            background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+            border-radius: 15px;
+            margin: 20px 0;
+        ">
+            <h3 style="margin: 0; color: #666;">👋 Welcome to CitizenAI!</h3>
+            <p style="margin: 10px 0 0 0; color: #888;">Start a conversation by asking a question about city services.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+# Helper function for managing chat history
+def add_message_to_history(role, content):
+    """Add a message to conversation history with timestamp"""
+    timestamp = datetime.datetime.now().strftime("%H:%M")
+    message = {
+        "role": role,
+        "content": content,
+        "timestamp": timestamp
+    }
+    st.session_state.conversation_history.append(message)
+
+# Process user input with enhanced chat history
+def process_user_input(user_input, conversation_manager):
+    """Process user input with enhanced chat history"""
+    
+    # Add user message to chat with timestamp
+    add_message_to_history("user", user_input)
+    
+    # Get priority and category (would normally come from QueryClassifier)
+    query_category = "Public Services"  # Example category
+    priority = "Medium"  # Example priority
+    
+    # Process with IBM Granite model
+    with st.spinner("🤔 Processing your request..."):
+        # Get the conversation context
+        response = conversation_manager.get_response(user_input)
+
+        # Clean the output: keep only the assistant's actual reply
+        if "Assistant:" in response:
+            assistant_reply = response.split("Assistant:")[-1].strip()
+        elif "AI:" in response:
+            assistant_reply = response.split("AI:")[-1].strip()
+        else:
+            assistant_reply = response.strip()
+            if assistant_reply.endswith(("and", "or", "of", "with", "to", ",")):
+                assistant_reply += "..."
+            elif not assistant_reply.endswith((".", "!", "?")):
+                assistant_reply += "..."
+
+        # Format the response with category info
+        formatted_response = f"*Query categorized as: {query_category} (Priority: {priority})*\n\n{assistant_reply}"
+        
+        # Add to conversation history with timestamp
+        add_message_to_history("assistant", formatted_response)
+        
+        return formatted_response
     
     with announcements_tab:
         st.header("Public Announcements")
@@ -898,13 +1379,14 @@ def render_about():
     team_cols = st.columns(4)
     
     with team_cols[0]:
-        st.markdown("**Jane Smith**<br>AI Engineer", unsafe_allow_html=True)
+        st.markdown("**Aditya Mallela**<br>AI Engineer", unsafe_allow_html=True)
     with team_cols[1]:
-        st.markdown("**Alex Johnson**<br>Full-stack Developer", unsafe_allow_html=True)
+        st.markdown("**Aditya Mallela**<br>Full-stack Developer", unsafe_allow_html=True)
     with team_cols[2]:
-        st.markdown("**Sarah Chen**<br>UX/UI Designer", unsafe_allow_html=True)
+        st.markdown("**Akshith Jalagari**<br>UX/UI Designer", unsafe_allow_html=True)
     with team_cols[3]:
-        st.markdown("**Michael Brown**<br>Data Scientist", unsafe_allow_html=True)
+        st.markdown("**Pavan Kumar Mudumba**<br>Data Scientist", unsafe_allow_html=True)
+
 
 # Run the application
 if __name__ == "__main__":
