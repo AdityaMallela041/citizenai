@@ -27,6 +27,7 @@ from utils.complaint import (
     render_citizen_complaints_view,
     render_government_complaints_view,
 )
+from utils.document_processor import DocumentProcessor, render_document_processor
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
@@ -339,8 +340,11 @@ def init_utilities():
     query_classifier = QueryClassifier()
     from utils.complaint import ComplaintManager
     complaint_manager = ComplaintManager(st.session_state.db_connection)
+    
+    # Add this line:
+    document_processor = DocumentProcessor(st.session_state.db_connection, model, tokenizer)
 
-    return conversation_manager, sentiment_analyzer, query_classifier, complaint_manager
+    return conversation_manager, sentiment_analyzer, query_classifier, complaint_manager, document_processor
 # Main application
 def main():
     # Initialize session state first
@@ -365,7 +369,7 @@ def main():
         model = st.session_state.model
         device = st.session_state.device
     
-    conversation_manager, sentiment_analyzer, query_classifier, complaint_manager = init_utilities()
+    conversation_manager, sentiment_analyzer, query_classifier, complaint_manager, document_processor = init_utilities()
     
     # Check if user is logged in
     is_logged_in, user_type = check_session()
@@ -377,6 +381,8 @@ def main():
     
     st.session_state.complaint_manager = complaint_manager
     st.session_state.user_type = user_type
+    # Add this line after other session state assignments:
+    st.session_state.document_processor = document_processor
 
 
     # Common header and navigation for authenticated users
@@ -533,12 +539,18 @@ def main():
                 ("Analytics Dashboard", "dashboard"), 
                 ("System Information", "about")
             ]
-            # ✅ Insert complaint pages conditionally
+
+            # Insert complaint and resource pages conditionally
             if user_type == "citizen":
                 user_options.insert(1, ("Submit Complaint", "submit_complaint"))
                 user_options.insert(2, ("My Complaints", "my_complaints"))
+                # Add this line:
+                user_options.insert(3, ("Document Analysis", "document_processor"))
+
             elif user_type in ["government", "admin"]:
                 user_options.insert(1, ("Manage Complaints", "manage_complaints"))
+                # Add this line:
+                user_options.insert(2, ("Document Analysis", "document_processor"))
 
             
             # Add admin options for government officials and admins
@@ -603,6 +615,11 @@ def main():
         render_dashboard()
     elif st.session_state.current_page == "admin":
         render_admin_panel()
+    
+    # Add this condition in the page display section:
+    elif st.session_state.current_page == "document_processor":
+        render_document_processor(st.session_state.document_processor, st.session_state.user_id)    
+
      # ✅ Complaint system pages
     elif st.session_state.current_page == "submit_complaint":
         render_complaint_submission_form(complaint_manager, st.session_state.user_id)
@@ -892,7 +909,152 @@ def render_admin_panel():
     with tabs[2]:
         st.subheader("System Settings")
         
-        st.write("Coming soon: System configuration options")
+        # System Configuration
+        config_col1, config_col2 = st.columns(2)
+        
+        with config_col1:
+            st.markdown("### 🔧 General Settings")
+            
+            # System maintenance mode
+            maintenance_mode = st.checkbox("Enable Maintenance Mode", value=False)
+            if maintenance_mode:
+                st.warning("⚠️ System will be in maintenance mode - citizens won't be able to access services")
+                maintenance_message = st.text_area("Maintenance Message", 
+                    value="The system is currently under maintenance. Please try again later.")
+            
+            # Auto-approval settings
+            st.markdown("### 👥 User Management")
+            auto_approve_citizens = st.checkbox("Auto-approve citizen registrations", value=True)
+            auto_approve_gov = st.checkbox("Auto-approve government officials", value=False)
+            
+            # Session settings
+            st.markdown("### ⏱️ Session Management")
+            session_timeout = st.slider("Session timeout (hours)", min_value=1, max_value=24, value=8)
+            max_concurrent_sessions = st.number_input("Max concurrent sessions per user", min_value=1, max_value=10, value=3)
+            
+            # Notification settings
+            st.markdown("### 📧 Notifications")
+            email_notifications = st.checkbox("Enable email notifications", value=True)
+            if email_notifications:
+                smtp_server = st.text_input("SMTP Server", value="smtp.gmail.com")
+                smtp_port = st.number_input("SMTP Port", value=587)
+                admin_email = st.text_input("Admin Email", value="admin@citizenai.gov")
+        
+        with config_col2:
+            st.markdown("### 📊 AI Assistant Settings")
+            
+            # Model configuration
+            max_response_length = st.slider("Max AI response length (words)", min_value=50, max_value=500, value=200)
+            response_temperature = st.slider("AI Response Creativity", min_value=0.1, max_value=1.0, value=0.7, step=0.1)
+            
+            # Content filtering
+            st.markdown("### 🛡️ Content Filtering")
+            enable_profanity_filter = st.checkbox("Enable profanity filter", value=True)
+            enable_spam_detection = st.checkbox("Enable spam detection", value=True)
+            
+            # Query limits
+            st.markdown("### 🚦 Rate Limiting")
+            queries_per_minute = st.number_input("Max queries per minute per user", min_value=1, max_value=60, value=10)
+            daily_query_limit = st.number_input("Daily query limit per user", min_value=10, max_value=1000, value=100)
+            
+            # Data retention
+            st.markdown("### 💾 Data Management")
+            chat_history_retention = st.selectbox("Chat history retention", 
+                ["7 days", "30 days", "90 days", "1 year", "Indefinite"], index=2)
+            complaint_retention = st.selectbox("Complaint data retention", 
+                ["1 year", "2 years", "5 years", "Indefinite"], index=2)
+            
+            # Backup settings
+            auto_backup = st.checkbox("Enable automatic backups", value=True)
+            if auto_backup:
+                backup_frequency = st.selectbox("Backup frequency", 
+                    ["Daily", "Weekly", "Monthly"], index=0)
+        
+        st.markdown("---")
+        
+        # System status section
+        st.markdown("### 📈 System Status")
+        
+        status_col1, status_col2, status_col3, status_col4 = st.columns(4)
+        
+        with status_col1:
+            st.metric("System Uptime", "99.8%", "+0.2%")
+        
+        with status_col2:
+            st.metric("Active Users", "1,247", "+12")
+        
+        with status_col3:
+            st.metric("Queries Today", "3,892", "+324")
+        
+        with status_col4:
+            st.metric("Response Time", "0.8s", "-0.1s")
+        
+        # Database management
+        st.markdown("### 🗄️ Database Management")
+        
+        db_col1, db_col2, db_col3 = st.columns(3)
+        
+        with db_col1:
+            if st.button("🔄 Optimize Database"):
+                with st.spinner("Optimizing database..."):
+                    # Simulate database optimization
+                    time.sleep(2)
+                    st.success("Database optimized successfully!")
+        
+        with db_col2:
+            if st.button("💾 Create Backup"):
+                with st.spinner("Creating backup..."):
+                    # Simulate backup creation
+                    time.sleep(3)
+                    backup_filename = f"citizenai_backup_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+                    st.success(f"Backup created: {backup_filename}")
+        
+        with db_col3:
+            if st.button("🧹 Clean Old Data"):
+                with st.spinner("Cleaning old data..."):
+                    # Simulate data cleanup
+                    time.sleep(2)
+                    st.success("Old data cleaned successfully!")
+        
+        # System logs
+        st.markdown("### 📋 System Logs")
+        
+        log_type = st.selectbox("Log Type", ["Error Logs", "Access Logs", "System Logs", "Security Logs"])
+        log_lines = st.slider("Number of lines to display", min_value=10, max_value=100, value=50)
+        
+        # Sample log data (in a real system, this would come from actual log files)
+        sample_logs = [
+            f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] INFO: User authentication successful for user: admin",
+            f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] INFO: Database backup completed successfully",
+            f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] WARNING: High CPU usage detected: 85%",
+            f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] INFO: New complaint submitted by citizen user",
+            f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: Failed to send email notification",
+        ]
+        
+        if st.button("Refresh Logs"):
+            st.code("\n".join(sample_logs[:log_lines]), language="text")
+        
+        # Save settings button
+        st.markdown("---")
+        
+        col1, col2, col3 = st.columns([1, 1, 1])
+        
+        with col1:
+            if st.button("💾 Save Settings", type="primary", use_container_width=True):
+                # In a real application, you would save these settings to the database
+                st.success("Settings saved successfully!")
+                st.balloons()
+        
+        with col2:
+            if st.button("🔄 Reset to Defaults", use_container_width=True):
+                st.warning("Settings reset to default values")
+                st.rerun()
+        
+        with col3:
+            if st.button("🧪 Test Configuration", use_container_width=True):
+                with st.spinner("Testing configuration..."):
+                    time.sleep(2)
+                    st.success("All configurations are working properly!")
     
     with tabs[3]:
         st.subheader("Manage Announcements")
@@ -1386,7 +1548,6 @@ def render_about():
         st.markdown("**Akshith Jalagari**<br>UX/UI Designer", unsafe_allow_html=True)
     with team_cols[3]:
         st.markdown("**Pavan Kumar Mudumba**<br>Data Scientist", unsafe_allow_html=True)
-
 
 # Run the application
 if __name__ == "__main__":

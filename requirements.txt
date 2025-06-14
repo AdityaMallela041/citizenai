@@ -1,27 +1,69 @@
-# requirements.txt
+# Core web framework
+streamlit>=1.28.0
 
-# Core dependencies
-streamlit>=1.32.0
-transformers>=4.37.0
-torch>=2.1.0
+# Machine Learning and NLP
+transformers>=4.35.0
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
 
-# LangChain for conversation management
-langchain>=0.1.0
+# Data processing and analysis
+pandas>=1.5.0
+numpy>=1.24.0
 
-# Data processing
-pandas>=2.1.0
-numpy>=1.26.0
+# LangChain ecosystem
+langchain>=0.0.350
+langchain-community>=0.0.10
 
-# Sentiment analysis
-nltk>=3.8.1
-textblob>=0.17.1
+# Environment management
+python-dotenv>=1.0.0
 
-# Visualization
-plotly>=5.18.0
-matplotlib>=3.8.0
+# Database
+sqlite3  # Built-in with Python, but listed for clarity
 
-# Authentication
-sqlalchemy>=2.0.0
-passlib>=1.7.4
-bcrypt>=4.0.1
-extra-streamlit-components>=0.1.6
+# Additional utilities that might be needed based on your custom modules
+plotly>=5.15.0  # For visualization charts
+matplotlib>=3.7.0  # Alternative visualization library
+seaborn>=0.12.0  # Statistical visualization
+
+# Text processing (often needed for NLP applications)
+nltk>=3.8.0
+textblob>=0.17.0
+
+# For document processing (common requirements)
+PyPDF2>=3.0.0
+python-docx>=0.8.11
+openpyxl>=3.1.0
+
+# For handling various file formats
+Pillow>=10.0.0
+
+# For API requests (if needed)
+requests>=2.31.0
+
+# For handling JSON and other data formats
+jsonschema>=4.19.0
+
+# Security and hashing (since you use hashlib)
+cryptography>=41.0.0
+
+# For better error handling and logging
+loguru>=0.7.0
+
+# For date and time handling
+python-dateutil>=2.8.0
+
+# For UUID generation (built-in but good to note)
+# uuid  # Built-in with Python
+
+# For base64 encoding (built-in but good to note)
+# base64  # Built-in with Python
+
+# Optional: For better performance
+accelerate>=0.24.0  # For faster model loading with transformers
+
+# Optional: For model quantization and optimization
+bitsandbytes>=0.41.0
+
+# Optional: For better tokenization
+tokenizers>=0.15.0
